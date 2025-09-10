@@ -19,8 +19,8 @@
 
 #include <optional>
 #include "starboard/android/shared/jni_env_ext.h"
+#include "starboard/common/check_op.h"
 #include "starboard/common/log.h"
-#include "starboard/common/mutex.h"
 #include "starboard/configuration.h"
 #include "starboard/media.h"
 #include "starboard/shared/starboard/player/filter/audio_frame_tracker.h"
@@ -92,7 +92,7 @@ inline int GetAudioFormatSampleType(
     // TODO: Consider using 18 (AudioFormat.ENCODING_E_AC3_JOC) when supported.
   }
 
-  SB_DCHECK(coding_type == kSbMediaAudioCodingTypePcm);
+  SB_DCHECK_EQ(coding_type, kSbMediaAudioCodingTypePcm);
   SB_DCHECK(sample_type);
 
   switch (sample_type.value()) {

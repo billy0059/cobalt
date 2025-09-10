@@ -1,6 +1,16 @@
-// Copyright 2025 The Cobalt Authors
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Copyright 2025 The Cobalt Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include "cobalt/shell/browser/shell_content_browser_client.h"
 
@@ -35,13 +45,12 @@
 #include "cobalt/shell/browser/shell_devtools_manager_delegate.h"
 #include "cobalt/shell/browser/shell_paths.h"
 #include "cobalt/shell/browser/shell_web_contents_view_delegate_creator.h"
+#include "cobalt/shell/common/shell_switches.h"
 #include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/custom_handlers/protocol_handler_throttle.h"
-#include "components/custom_handlers/simple_protocol_handler_registry_factory.h"
 #include "components/metrics/client_info.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/metrics_state_manager.h"
-#include "components/metrics/test/test_enabled_state_provider.h"
 #include "components/network_hints/browser/simple_network_hints_handler_impl.h"
 #include "components/performance_manager/embedder/performance_manager_registry.h"
 #include "components/prefs/json_pref_store.h"
@@ -68,14 +77,11 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/user_agent.h"
-#include "content/shell/common/shell_controller.test-mojom.h"
-#include "content/shell/common/shell_switches.h"
 #include "media/mojo/buildflags.h"
 #include "media/mojo/mojom/media_service.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/ssl/client_cert_identity.h"
-#include "services/device/public/cpp/geolocation/location_system_permission_status.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/network_service_buildflags.h"
 #include "services/network/public/mojom/network_context.mojom.h"
@@ -93,8 +99,8 @@
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/apk_assets.h"
 #include "base/android/path_utils.h"
+#include "cobalt/shell/android/shell_descriptors.h"
 #include "components/variations/android/variations_seed_bridge.h"
-#include "content/shell/android/shell_descriptors.h"
 #endif
 
 #if BUILDFLAG(IS_ANDROID)
@@ -115,10 +121,12 @@
 #include "services/network/public/mojom/ct_log_info.mojom.h"
 #endif
 
-#if BUILDFLAG(IS_IOS)
-#include "cobalt/shell/browser/bluetooth/shell_bluetooth_delegate_impl_client.h"
-#include "components/permissions/bluetooth_delegate_impl.h"
-#endif
+#if defined(RUN_BROWSER_TESTS)
+#include "cobalt/shell/common/shell_controller.test-mojom.h"  // nogncheck
+#include "cobalt/shell/common/shell_test_switches.h"          // nogncheck
+#include "components/custom_handlers/simple_protocol_handler_registry_factory.h"  //nogncheck
+#include "components/metrics/test/test_enabled_state_provider.h"  // nogncheck
+#endif  // defined(RUN_BROWSER_TESTS)
 
 namespace content {
 
@@ -144,6 +152,7 @@ int GetCrashSignalFD(const base::CommandLine& command_line) {
 }
 #endif
 
+#if defined(RUN_BROWSER_TESTS)
 class ShellControllerImpl : public mojom::ShellController {
  public:
   ShellControllerImpl() = default;
@@ -170,6 +179,7 @@ class ShellControllerImpl : public mojom::ShellController {
 
   void ShutDown() override { Shell::Shutdown(); }
 };
+#endif  // defined(RUN_BROWSER_TESTS)
 
 // TODO(crbug/1219642): Consider not needing VariationsServiceClient just to use
 // VariationsFieldTrialCreator.
@@ -267,6 +277,7 @@ SharedState& GetSharedState() {
   return *g_shared_state;
 }
 
+#if defined(RUN_BROWSER_TESTS)
 std::unique_ptr<PrefService> CreateLocalState() {
   auto pref_registry = base::MakeRefCounted<PrefRegistrySimple>();
 
@@ -283,6 +294,7 @@ std::unique_ptr<PrefService> CreateLocalState() {
 
   return pref_service_factory.Create(pref_registry);
 }
+#endif  // defined(RUN_BROWSER_TESTS)
 
 }  // namespace
 
@@ -349,11 +361,13 @@ ShellContentBrowserClient::CreateBrowserMainParts(
 bool ShellContentBrowserClient::HasCustomSchemeHandler(
     content::BrowserContext* browser_context,
     const std::string& scheme) {
+#if defined(RUN_BROWSER_TESTS)
   if (custom_handlers::ProtocolHandlerRegistry* protocol_handler_registry =
           custom_handlers::SimpleProtocolHandlerRegistryFactory::
               GetForBrowserContext(browser_context)) {
     return protocol_handler_registry->IsHandledProtocol(scheme);
   }
+#endif  // defined(RUN_BROWSER_TESTS)
   return false;
 }
 
@@ -366,6 +380,7 @@ ShellContentBrowserClient::CreateURLLoaderThrottles(
     int frame_tree_node_id) {
   std::vector<std::unique_ptr<blink::URLLoaderThrottle>> result;
 
+#if defined(RUN_BROWSER_TESTS)
   auto* factory = custom_handlers::SimpleProtocolHandlerRegistryFactory::
       GetForBrowserContext(browser_context);
   // null in unit tests.
@@ -373,6 +388,7 @@ ShellContentBrowserClient::CreateURLLoaderThrottles(
     result.push_back(
         std::make_unique<custom_handlers::ProtocolHandlerThrottle>(*factory));
   }
+#endif  // defined(RUN_BROWSER_TESTS)
 
   return result;
 }
@@ -401,12 +417,21 @@ void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
   static const char* kForwardSwitches[] = {
       switches::kCrashDumpsDir,
       switches::kEnableCrashReporter,
+  };
+
+  command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
+                                 kForwardSwitches, std::size(kForwardSwitches));
+
+#if defined(RUN_BROWSER_TESTS)
+  static const char* kForwardTestSwitches[] = {
       switches::kExposeInternalsForTesting,
       switches::kRunWebTests,
   };
 
   command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
-                                 kForwardSwitches, std::size(kForwardSwitches));
+                                 kForwardTestSwitches,
+                                 std::size(kForwardTestSwitches));
+#endif  // defined(RUN_BROWSER_TESTS)
 
 #if BUILDFLAG(IS_LINUX)
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -676,6 +701,7 @@ BluetoothDelegate* ShellContentBrowserClient::GetBluetoothDelegate() {
 }
 #endif
 
+#if defined(RUN_BROWSER_TESTS)
 void ShellContentBrowserClient::BindBrowserControlInterface(
     mojo::ScopedMessagePipeHandle pipe) {
   if (!pipe.is_valid()) {
@@ -685,6 +711,7 @@ void ShellContentBrowserClient::BindBrowserControlInterface(
       std::make_unique<ShellControllerImpl>(),
       mojo::PendingReceiver<mojom::ShellController>(std::move(pipe)));
 }
+#endif  // defined(RUN_BROWSER_TESTS)
 
 void ShellContentBrowserClient::set_browser_main_parts(
     ShellBrowserMainParts* parts) {
@@ -740,14 +767,17 @@ bool ShellContentBrowserClient::HasErrorPage(int http_status_code) {
 }
 
 void ShellContentBrowserClient::CreateFeatureListAndFieldTrials() {
+#if defined(RUN_BROWSER_TESTS)
   GetSharedState().local_state = CreateLocalState();
   SetUpFieldTrials();
   // Schedule a Local State write since the above function resulted in some
   // prefs being updated.
   GetSharedState().local_state->CommitPendingWrite();
+#endif  // defined(RUN_BROWSER_TESTS)
 }
 
 void ShellContentBrowserClient::SetUpFieldTrials() {
+#if defined(RUN_BROWSER_TESTS)
   metrics::TestEnabledStateProvider enabled_state_provider(/*consent=*/false,
                                                            /*enabled=*/false);
   base::FilePath path;
@@ -818,6 +848,7 @@ void ShellContentBrowserClient::SetUpFieldTrials() {
       feature_overrides, std::move(feature_list), metrics_state_manager.get(),
       &platform_field_trials, &safe_seed_manager,
       /*add_entropy_source_to_variations_ids=*/false);
+#endif  // defined(RUN_BROWSER_TESTS)
 }
 
 absl::optional<blink::ParsedPermissionsPolicy>

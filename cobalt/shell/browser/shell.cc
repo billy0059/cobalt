@@ -1,6 +1,16 @@
-// Copyright 2025 The Cobalt Authors
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Copyright 2025 The Cobalt Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include "cobalt/shell/browser/shell.h"
 
@@ -20,12 +30,16 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "cobalt/shell/app/resource.h"
 #include "cobalt/shell/browser/shell_content_browser_client.h"
 #include "cobalt/shell/browser/shell_devtools_frontend.h"
 #include "cobalt/shell/browser/shell_javascript_dialog_manager.h"
+#include "cobalt/shell/common/shell_switches.h"
 #include "components/custom_handlers/protocol_handler.h"
 #include "components/custom_handlers/protocol_handler_registry.h"
-#include "components/custom_handlers/simple_protocol_handler_registry_factory.h"
+#if defined(RUN_BROWSER_TESTS)
+#include "components/custom_handlers/simple_protocol_handler_registry_factory.h"  //nogncheck
+#endif  // defined(RUN_BROWSER_TESTS)
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/file_select_listener.h"
@@ -39,13 +53,15 @@
 #include "content/public/browser/renderer_preferences_util.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
-#include "content/shell/app/resource.h"
-#include "content/shell/common/shell_switches.h"
 #include "media/media_buildflags.h"
 #include "third_party/blink/public/common/peerconnection/webrtc_ip_handling_policy.h"
 #include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/blink/public/mojom/choosers/file_chooser.mojom-forward.h"
 #include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
+
+#if defined(RUN_BROWSER_TESTS)
+#include "cobalt/shell/common/shell_test_switches.h"  // nogncheck
+#endif  // defined(RUN_BROWSER_TESTS)
 
 namespace content {
 
@@ -76,10 +92,15 @@ Shell::Shell(std::unique_ptr<WebContents> web_contents,
     web_contents_->SetDelegate(this);
   }
 
+#if defined(RUN_BROWSER_TESTS)
   if (!switches::IsRunWebTestsSwitchPresent()) {
     UpdateFontRendererPreferencesFromSystemSettings(
         web_contents_->GetMutableRendererPrefs());
   }
+#else
+  UpdateFontRendererPreferencesFromSystemSettings(
+      web_contents_->GetMutableRendererPrefs());
+#endif  // defined(RUN_BROWSER_TESTS)
 
   windows_.push_back(this);
 
@@ -113,6 +134,7 @@ Shell* Shell::CreateShell(std::unique_ptr<WebContents> web_contents,
   Shell* shell = new Shell(std::move(web_contents), should_set_delegate);
   g_platform->CreatePlatformWindow(shell, initial_size);
 
+#if defined(RUN_BROWSER_TESTS)
   // Note: Do not make RenderFrameHost or RenderViewHost specific state changes
   // here, because they will be forgotten after a cross-process navigation. Use
   // RenderFrameCreated or RenderViewCreated instead.
@@ -120,6 +142,7 @@ Shell* Shell::CreateShell(std::unique_ptr<WebContents> web_contents,
     raw_web_contents->GetMutableRendererPrefs()->use_custom_colors = false;
     raw_web_contents->SyncRendererPrefs();
   }
+#endif  // defined(RUN_BROWSER_TESTS)
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kForceWebRtcIPHandlingPolicy)) {
@@ -515,6 +538,7 @@ void Shell::RegisterProtocolHandler(RenderFrameHost* requesting_frame,
   // https://html.spec.whatwg.org/multipage/system-state.html#normalize-protocol-handler-parameters
   DCHECK(handler.IsValid());
 
+#if defined(RUN_BROWSER_TESTS)
   custom_handlers::ProtocolHandlerRegistry* registry = custom_handlers::
       SimpleProtocolHandlerRegistryFactory::GetForBrowserContext(context, true);
   DCHECK(registry);
@@ -544,6 +568,7 @@ void Shell::RegisterProtocolHandler(RenderFrameHost* requesting_frame,
       custom_handlers::RphRegistrationMode::kAutoAccept) {
     registry->OnAcceptRegisterProtocolHandler(handler);
   }
+#endif  // defined(RUN_BROWSER_TESTS)
 }
 #endif
 
@@ -602,7 +627,11 @@ bool Shell::DidAddMessageToConsole(WebContents* source,
                                    const std::u16string& message,
                                    int32_t line_no,
                                    const std::u16string& source_id) {
+#if defined(RUN_BROWSER_TESTS)
   return switches::IsRunWebTestsSwitchPresent();
+#else
+  return false;
+#endif  // defined(RUN_BROWSER_TESTS)
 }
 
 void Shell::PortalWebContentsCreated(WebContents* portal_web_contents) {
@@ -686,12 +715,14 @@ bool Shell::ShouldAllowRunningInsecureContent(WebContents* web_contents,
 }
 
 PictureInPictureResult Shell::EnterPictureInPicture(WebContents* web_contents) {
+#if defined(RUN_BROWSER_TESTS)
   // During tests, returning success to pretend the window was created and allow
   // tests to run accordingly.
-  if (!switches::IsRunWebTestsSwitchPresent()) {
-    return PictureInPictureResult::kNotSupported;
+  if (switches::IsRunWebTestsSwitchPresent()) {
+    return PictureInPictureResult::kSuccess;
   }
-  return PictureInPictureResult::kSuccess;
+#endif  // defined(RUN_BROWSER_TESTS)
+  return PictureInPictureResult::kNotSupported;
 }
 
 bool Shell::ShouldResumeRequestsForCreatedWindow() {
@@ -701,6 +732,7 @@ bool Shell::ShouldResumeRequestsForCreatedWindow() {
 void Shell::SetContentsBounds(WebContents* source, const gfx::Rect& bounds) {
   DCHECK(source == web_contents());  // There's only one WebContents per Shell.
 
+#if defined(RUN_BROWSER_TESTS)
   if (switches::IsRunWebTestsSwitchPresent()) {
     // Note that chrome drops these requests on normal windows.
     // TODO(danakj): The position is dropped here but we use the size. Web tests
@@ -708,6 +740,7 @@ void Shell::SetContentsBounds(WebContents* source, const gfx::Rect& bounds) {
     // letting them pretend?
     g_platform->ResizeWebContent(this, bounds.size());
   }
+#endif  // defined(RUN_BROWSER_TESTS)
 }
 
 gfx::Size Shell::GetShellDefaultSize() {

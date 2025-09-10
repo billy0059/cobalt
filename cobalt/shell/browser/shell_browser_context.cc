@@ -1,6 +1,16 @@
-// Copyright 2025 The Cobalt Authors
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Copyright 2025 The Cobalt Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include "cobalt/shell/browser/shell_browser_context.h"
 
@@ -17,27 +27,23 @@
 #include "build/build_config.h"
 #include "cobalt/shell/browser/shell_content_browser_client.h"
 #include "cobalt/shell/browser/shell_content_index_provider.h"
-#include "cobalt/shell/browser/shell_download_manager_delegate.h"
-#include "cobalt/shell/browser/shell_federated_permission_context.h"
 #include "cobalt/shell/browser/shell_paths.h"
-#include "cobalt/shell/browser/shell_permission_manager.h"
+#include "cobalt/shell/common/shell_switches.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/simple_dependency_manager.h"
 #include "components/keyed_service/core/simple_factory_key.h"
 #include "components/keyed_service/core/simple_key_map.h"
 #include "components/network_session_configurator/common/network_switches.h"
-#include "components/origin_trials/browser/leveldb_persistence_provider.h"
-#include "components/origin_trials/browser/origin_trials.h"
-#include "components/origin_trials/common/features.h"
+#include "content/public/browser/background_sync_controller.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/origin_trials_controller_delegate.h"
+#include "content/public/browser/reduce_accept_language_controller_delegate.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
-#include "content/shell/common/shell_switches.h"
-#include "content/test/mock_background_sync_controller.h"
-#include "content/test/mock_reduce_accept_language_controller_delegate.h"
-#include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
+#if defined(RUN_BROWSER_TESTS)
+#include "content/test/mock_background_sync_controller.h"  // nogncheck
+#include "content/test/mock_reduce_accept_language_controller_delegate.h"  // nogncheck
+#endif  // defined(RUN_BROWSER_TESTS)
 
 namespace content {
 
@@ -129,13 +135,7 @@ bool ShellBrowserContext::IsOffTheRecord() {
 }
 
 DownloadManagerDelegate* ShellBrowserContext::GetDownloadManagerDelegate() {
-  if (!download_manager_delegate_.get()) {
-    download_manager_delegate_ =
-        std::make_unique<ShellDownloadManagerDelegate>();
-    download_manager_delegate_->SetDownloadManager(GetDownloadManager());
-  }
-
-  return download_manager_delegate_.get();
+  return nullptr;
 }
 
 ResourceContext* ShellBrowserContext::GetResourceContext() {
@@ -170,10 +170,7 @@ SSLHostStateDelegate* ShellBrowserContext::GetSSLHostStateDelegate() {
 
 PermissionControllerDelegate*
 ShellBrowserContext::GetPermissionControllerDelegate() {
-  if (!permission_manager_.get()) {
-    permission_manager_ = std::make_unique<ShellPermissionManager>();
-  }
-  return permission_manager_.get();
+  return nullptr;
 }
 
 ClientHintsControllerDelegate*
@@ -186,11 +183,15 @@ BackgroundFetchDelegate* ShellBrowserContext::GetBackgroundFetchDelegate() {
 }
 
 BackgroundSyncController* ShellBrowserContext::GetBackgroundSyncController() {
+#if defined(RUN_BROWSER_TESTS)
   if (!background_sync_controller_) {
     background_sync_controller_ =
         std::make_unique<MockBackgroundSyncController>();
   }
   return background_sync_controller_.get();
+#else
+  return nullptr;
+#endif  // defined(RUN_BROWSER_TESTS)
 }
 
 BrowsingDataRemoverDelegate*
@@ -207,56 +208,36 @@ ContentIndexProvider* ShellBrowserContext::GetContentIndexProvider() {
 
 FederatedIdentityApiPermissionContextDelegate*
 ShellBrowserContext::GetFederatedIdentityApiPermissionContext() {
-  if (!federated_permission_context_) {
-    federated_permission_context_ =
-        std::make_unique<ShellFederatedPermissionContext>();
-  }
-  return federated_permission_context_.get();
+  return nullptr;
 }
 
 FederatedIdentityAutoReauthnPermissionContextDelegate*
 ShellBrowserContext::GetFederatedIdentityAutoReauthnPermissionContext() {
-  if (!federated_permission_context_) {
-    federated_permission_context_ =
-        std::make_unique<ShellFederatedPermissionContext>();
-  }
-  return federated_permission_context_.get();
+  return nullptr;
 }
 
 FederatedIdentityPermissionContextDelegate*
 ShellBrowserContext::GetFederatedIdentityPermissionContext() {
-  if (!federated_permission_context_) {
-    federated_permission_context_ =
-        std::make_unique<ShellFederatedPermissionContext>();
-  }
-  return federated_permission_context_.get();
+  return nullptr;
 }
 
 ReduceAcceptLanguageControllerDelegate*
 ShellBrowserContext::GetReduceAcceptLanguageControllerDelegate() {
+#if defined(RUN_BROWSER_TESTS)
   if (!reduce_accept_lang_controller_delegate_) {
     reduce_accept_lang_controller_delegate_ =
         std::make_unique<MockReduceAcceptLanguageControllerDelegate>(
             GetShellLanguage());
   }
   return reduce_accept_lang_controller_delegate_.get();
+#else
+  return nullptr;
+#endif  // defined(RUN_BROWSER_TESTS)
 }
 
 OriginTrialsControllerDelegate*
 ShellBrowserContext::GetOriginTrialsControllerDelegate() {
-  if (!origin_trials::features::IsPersistentOriginTrialsEnabled()) {
-    return nullptr;
-  }
-
-  if (!origin_trials_controller_delegate_) {
-    origin_trials_controller_delegate_ =
-        std::make_unique<origin_trials::OriginTrials>(
-            std::make_unique<origin_trials::LevelDbPersistenceProvider>(
-                GetPath(),
-                GetDefaultStoragePartition()->GetProtoDatabaseProvider()),
-            std::make_unique<blink::TrialTokenValidator>());
-  }
-  return origin_trials_controller_delegate_.get();
+  return nullptr;
 }
 
 }  // namespace content

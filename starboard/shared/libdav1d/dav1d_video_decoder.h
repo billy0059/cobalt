@@ -19,10 +19,12 @@
 
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <queue>
 #include <string>
 
 #include "starboard/common/ref_counted.h"
+#include "starboard/common/size.h"
 #include "starboard/decode_target.h"
 #include "starboard/shared/internal_only.h"
 #include "starboard/shared/starboard/player/filter/cpu_video_frame.h"
@@ -89,8 +91,7 @@ class VideoDecoder : public starboard::player::filter::VideoDecoder,
   DecoderStatusCB decoder_status_cb_;
   ErrorCB error_cb_;
 
-  int current_frame_width_ = 0;
-  int current_frame_height_ = 0;
+  Size current_frame_size_;
   int frames_being_decoded_ = 0;
   Dav1dContext* dav1d_context_ = NULL;
 
@@ -113,7 +114,7 @@ class VideoDecoder : public starboard::player::filter::VideoDecoder,
   // to obtain the current decode target (which ultimately ends up being a
   // copy of |decode_target_|), we need to safe-guard access to |decode_target_|
   // and we do so through this mutex.
-  Mutex decode_target_mutex_;
+  std::mutex decode_target_mutex_;
 
   std::queue<scoped_refptr<CpuVideoFrame>> frames_;
 };

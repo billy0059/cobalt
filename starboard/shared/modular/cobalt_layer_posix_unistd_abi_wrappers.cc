@@ -33,4 +33,34 @@ long __abi_wrap_sysconf(int name);
 long sysconf(int name) {
   return __abi_wrap_sysconf(name);
 }
+
+long __abi_wrap_pathconf(const char* path, int name);
+
+long pathconf(const char* path, int name) {
+  return __abi_wrap_pathconf(path, name);
 }
+
+pid_t __abi_wrap_getpid();
+
+pid_t getpid() {
+  return __abi_wrap_getpid();
+}
+
+uid_t __abi_wrap_geteuid();
+
+uid_t geteuid() {
+  return __abi_wrap_geteuid();
+}
+
+int __abi_wrap_access(const char* path, int amode);
+
+int access(const char* path, int amode) {
+  return __abi_wrap_access(path, amode);
+}
+
+int __abi_wrap_fchown(int fd, uid_t owner, gid_t group);
+
+int fchown(int fd, uid_t owner, gid_t group) {
+  return __abi_wrap_fchown(fd, owner, group);
+}
+}  // extern "C"

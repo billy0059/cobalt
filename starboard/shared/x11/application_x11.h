@@ -18,6 +18,7 @@
 #include <X11/Xlib.h>
 
 #include <memory>
+#include <mutex>
 #include <queue>
 #include <unordered_map>
 #include <vector>
@@ -49,12 +50,6 @@ class ApplicationX11 : public shared::starboard::QueueApplication {
 
   // Make the current GL layer and video layer visible.
   void Composite();
-
-  // Call this function before updating the GL layer.
-  void SwapBuffersBegin();
-
-  // Call this function after the GL layer has been updated.
-  void SwapBuffersEnd();
 
   // This is called immediately when SbPlayerSetBounds is called. The
   // application will queue the new bounds until the UI frame using these
@@ -119,11 +114,11 @@ class ApplicationX11 : public shared::starboard::QueueApplication {
   SbWindow FindWindow(Window window);
 
   Atom wake_up_atom_;
-  Atom wm_delete_atom_;
   Atom wm_change_state_atom_;
+  Atom wm_delete_atom_;
 
   SbEventId composite_event_id_;
-  Mutex frame_mutex_;
+  std::mutex frame_mutex_;
 
   // The latest frame for every active player.
   std::unordered_map<SbPlayer, scoped_refptr<VideoFrame>> next_video_frames_;

@@ -1,6 +1,16 @@
-// Copyright 2025 The Cobalt Authors
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Copyright 2025 The Cobalt Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #ifndef COBALT_SHELL_BROWSER_SHELL_CONTENT_BROWSER_CLIENT_H_
 #define COBALT_SHELL_BROWSER_SHELL_CONTENT_BROWSER_CLIENT_H_
@@ -143,7 +153,9 @@ class ShellContentBrowserClient : public ContentBrowserClient {
 #if BUILDFLAG(IS_IOS)
   BluetoothDelegate* GetBluetoothDelegate() override;
 #endif
+#if defined(RUN_BROWSER_TESTS)
   void BindBrowserControlInterface(mojo::ScopedMessagePipeHandle pipe) override;
+#endif  // defined(RUN_BROWSER_TESTS)
   void GetHyphenationDictionary(
       base::OnceCallback<void(const base::FilePath&)>) override;
   bool HasErrorPage(int http_status_code) override;
@@ -155,8 +167,7 @@ class ShellContentBrowserClient : public ContentBrowserClient {
       content::BrowserContext* browser_context,
       const url::Origin& app_origin) override;
 
-  void CreateFeatureListAndFieldTrials();
-
+  virtual void CreateFeatureListAndFieldTrials();
   ShellBrowserContext* browser_context();
   ShellBrowserContext* off_the_record_browser_context();
   ShellBrowserMainParts* shell_browser_main_parts();
@@ -216,7 +227,7 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   friend class ContentBrowserTestContentBrowserClient;
 
   // Needed so that content_shell can use fieldtrial_testing_config.
-  void SetUpFieldTrials();
+  virtual void SetUpFieldTrials();
 
   // Returns the list of ShellContentBrowserClients ordered by time created.
   // If a test overrides ContentBrowserClient, this list will have more than

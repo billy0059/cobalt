@@ -18,12 +18,13 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <mutex>
 
-#include "starboard/common/mutex.h"
+#include "starboard/common/check_op.h"
 #include "starboard/common/time.h"
 #include "starboard/configuration.h"
 #include "starboard/configuration_constants.h"
-#include "starboard/shared/pthread/thread_create_priority.h"
+#include "starboard/thread.h"
 
 namespace starboard::shared::starboard::audio_sink {
 namespace {
@@ -53,7 +54,7 @@ class StubAudioSink : public SbAudioSinkPrivate {
   void* context_;
 
   pthread_t audio_out_thread_;
-  ::starboard::Mutex mutex_;
+  std::mutex mutex_;
 
   bool destroying_;
 };
@@ -71,23 +72,27 @@ StubAudioSink::StubAudioSink(
       context_(context),
       audio_out_thread_(0),
       destroying_(false) {
-  pthread_create(&audio_out_thread_, nullptr, &StubAudioSink::ThreadEntryPoint,
-                 this);
-  SB_DCHECK(audio_out_thread_ != 0);
+  const int result = pthread_create(&audio_out_thread_, nullptr,
+                                    &StubAudioSink::ThreadEntryPoint, this);
+  SB_CHECK_EQ(result, 0);
 }
 
 StubAudioSink::~StubAudioSink() {
   {
-    ScopedLock lock(mutex_);
+    std::lock_guard lock(mutex_);
     destroying_ = true;
   }
-  pthread_join(audio_out_thread_, NULL);
+  SB_CHECK_EQ(pthread_join(audio_out_thread_, nullptr), 0);
 }
 
 // static
 void* StubAudioSink::ThreadEntryPoint(void* context) {
+#if defined(__APPLE__)
+  pthread_setname_np("stub_audio_out");
+#else
   pthread_setname_np(pthread_self(), "stub_audio_out");
-  shared::pthread::ThreadSetPriority(kSbThreadPriorityRealTime);
+#endif
+  SbThreadSetPriority(kSbThreadPriorityRealTime);
 
   SB_DCHECK(context);
   StubAudioSink* sink = reinterpret_cast<StubAudioSink*>(context);
@@ -101,7 +106,7 @@ void StubAudioSink::AudioThreadFunc() {
 
   for (;;) {
     {
-      ScopedLock lock(mutex_);
+      std::lock_guard lock(mutex_);
       if (destroying_) {
         break;
       }

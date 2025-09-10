@@ -1,6 +1,16 @@
-// Copyright 2025 The Cobalt Authors
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Copyright 2025 The Cobalt Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include "cobalt/shell/browser/shell_browser_main_parts.h"
 
@@ -19,10 +29,12 @@
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
+#include "cobalt/shell/android/shell_descriptors.h"
 #include "cobalt/shell/browser/shell.h"
 #include "cobalt/shell/browser/shell_browser_context.h"
 #include "cobalt/shell/browser/shell_devtools_manager_delegate.h"
 #include "cobalt/shell/browser/shell_platform_delegate.h"
+#include "cobalt/shell/common/shell_switches.h"
 #include "components/performance_manager/embedder/graph_features.h"
 #include "components/performance_manager/embedder/performance_manager_lifetime.h"
 #include "content/public/browser/browser_thread.h"
@@ -32,8 +44,6 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
-#include "content/shell/android/shell_descriptors.h"
-#include "content/shell/common/shell_switches.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_module.h"
@@ -50,7 +60,7 @@
 #endif
 
 #if defined(USE_AURA) && (BUILDFLAG(IS_LINUX))
-#include "ui/base/ime/init/input_method_initializer.h"
+#include "ui/base/ime/init/input_method_initializer.h"  // nogncheck
 #endif
 
 #if BUILDFLAG(IS_LINUX)
@@ -61,6 +71,10 @@
 #include "ui/linux/linux_ui.h"          // nogncheck
 #include "ui/linux/linux_ui_factory.h"  // nogncheck
 #endif
+
+#if defined(RUN_BROWSER_TESTS)
+#include "cobalt/shell/common/shell_test_switches.h"  // nogncheck
+#endif  // defined(RUN_BROWSER_TESTS)
 
 namespace content {
 
@@ -124,11 +138,6 @@ int ShellBrowserMainParts::PreEarlyInitialization() {
 void ShellBrowserMainParts::InitializeBrowserContexts() {
   set_browser_context(new ShellBrowserContext(false));
   set_off_the_record_browser_context(new ShellBrowserContext(true));
-  // Persistent Origin Trials needs to be instantiated as soon as possible
-  // during browser startup, to ensure data is available prior to the first
-  // request.
-  browser_context_->GetOriginTrialsControllerDelegate();
-  off_the_record_browser_context_->GetOriginTrialsControllerDelegate();
 }
 
 void ShellBrowserMainParts::InitializeMessageLoopContext() {
@@ -137,9 +146,11 @@ void ShellBrowserMainParts::InitializeMessageLoopContext() {
 }
 
 void ShellBrowserMainParts::ToolkitInitialized() {
+#if defined(RUN_BROWSER_TESTS)
   if (switches::IsRunWebTestsSwitchPresent()) {
     return;
   }
+#endif  // defined(RUN_BROWSER_TESTS)
 
 #if BUILDFLAG(IS_LINUX)
   ui::LinuxUi::SetInstance(ui::GetDefaultLinuxUi());

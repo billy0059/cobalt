@@ -21,7 +21,6 @@ import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.graphics.Color;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
@@ -42,39 +41,34 @@ import dev.cobalt.coat.javabridge.HTMLMediaElementExtension;
 import dev.cobalt.media.AudioOutputManager;
 import dev.cobalt.media.MediaCodecCapabilitiesLogger;
 import dev.cobalt.media.VideoSurfaceView;
+import dev.cobalt.shell.Shell;
+import dev.cobalt.shell.ShellManager;
 import dev.cobalt.util.DisplayUtil;
 import dev.cobalt.util.Log;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import java.util.regex.Pattern;
 import org.chromium.base.CommandLine;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
+import org.chromium.base.memory.MemoryPressureMonitor;
 import org.chromium.components.version_info.VersionInfo;
 import org.chromium.content.browser.input.ImeAdapterImpl;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.DeviceUtils;
 import org.chromium.content_public.browser.JavascriptInjector;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_shell.Shell;
-import org.chromium.content_shell.ShellManager;
-import org.chromium.content_shell.Util;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.IntentRequestTracker;
 
 /** Native activity that has the required JNI methods called by the Starboard implementation. */
 public abstract class CobaltActivity extends Activity {
   private static final String URL_ARG = "--url=";
-  private static final java.lang.String META_DATA_APP_URL = "cobalt.APP_URL";
+  private static final String META_DATA_APP_URL = "cobalt.APP_URL";
 
   // This key differs in naming format for legacy reasons
   public static final String COMMAND_LINE_ARGS_KEY = "commandLineArgs";
-  public static final String COMMAND_LINE_JS_FLAGS_KEY = "js-flags";
-  public static final String COMMAND_LINE_ENABLE_FEATURES_KEY = "enable-features";
-  public static final String COMMAND_LINE_DISABLE_FEATURES_KEY = "disable-features";
-  public static final String COMMAND_LINE_BLINK_ENABLE_FEATURES_KEY = "blink-enable-features";
 
   private static final Pattern URL_PARAM_PATTERN = Pattern.compile("^[a-zA-Z0-9_=]*$");
 
@@ -97,6 +91,11 @@ public abstract class CobaltActivity extends Activity {
   private String mStartupUrl;
   private IntentRequestTracker mIntentRequestTracker;
   protected Boolean shouldSetJNIPrefix = true;
+  // Tracks whether we should reload the page on resume, to re-trigger a network error dialog.
+  protected Boolean mShouldReloadOnResume = false;
+  // Tracks the status of the FLAG_KEEP_SCREEN_ON window flag.
+  private Boolean isKeepScreenOnEnabled = false;
+  private String diagnosticFinishReason = "Unknown";
 
   // Initially copied from ContentShellActiviy.java
   protected void createContent(final Bundle savedInstanceState) {
@@ -104,31 +103,10 @@ public abstract class CobaltActivity extends Activity {
     if (!CommandLine.isInitialized()) {
       CommandLine.init(null);
 
-      String[] commandLineOverrides =
-          getCommandLineParamsFromIntent(
-              getIntent(), COMMAND_LINE_ARGS_KEY);
-      String[] jsFlagOverrides =
-          getCommandLineParamsFromIntent(
-              getIntent(), COMMAND_LINE_JS_FLAGS_KEY);
-      String[] enableFeaturesCommandLineOverrides =
-          getCommandLineParamsFromIntent(
-              getIntent(), COMMAND_LINE_ENABLE_FEATURES_KEY);
-      String[] disableFeaturesCommandLineOverrides =
-          getCommandLineParamsFromIntent(
-              getIntent(), COMMAND_LINE_DISABLE_FEATURES_KEY);
-      String[] blinkEnableFeaturesCommandLineOverrides =
-          getCommandLineParamsFromIntent(
-              getIntent(), COMMAND_LINE_BLINK_ENABLE_FEATURES_KEY);
+      String[] commandLineArgs = getCommandLineParamsFromIntent(getIntent(), COMMAND_LINE_ARGS_KEY);
       CommandLineOverrideHelper.getFlagOverrides(
           new CommandLineOverrideHelper.CommandLineOverrideHelperParams(
-              shouldSetJNIPrefix,
-              VersionInfo.isOfficialBuild(),
-              commandLineOverrides,
-              jsFlagOverrides,
-              enableFeaturesCommandLineOverrides,
-              disableFeaturesCommandLineOverrides,
-              blinkEnableFeaturesCommandLineOverrides
-        ));
+              shouldSetJNIPrefix, VersionInfo.isOfficialBuild(), commandLineArgs));
     }
 
     DeviceUtils.addDeviceSpecificUserAgentSwitch();
@@ -160,7 +138,6 @@ public abstract class CobaltActivity extends Activity {
     mWindowAndroid = new ActivityWindowAndroid(this, listenToActivityState, mIntentRequestTracker);
     mIntentRequestTracker.restoreInstanceState(savedInstanceState);
     mShellManager.setWindow(mWindowAndroid);
-    setContentView(mShellManager.getContentViewRenderView());
     // Set up the animation placeholder to be the SurfaceView. This disables the
     // SurfaceView's 'hole' clipping during animations that are notified to the window.
     mWindowAndroid.setAnimationPlaceholderView(
@@ -189,13 +166,62 @@ public abstract class CobaltActivity extends Activity {
             new BrowserStartupController.StartupCallback() {
               @Override
               public void onSuccess() {
+                // Verbose code to differentiate different possible crash reasons
+                // for JNI crash on prime. Only the line number of the exception
+                // is output, hence the else/if block. b/439066169
+                if (isFinishing() || isDestroyed()) {
+                  if ("ON_BACK_PRESSED".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: ON_BACK_PRESSED");
+                  } else if ("ON_LOW_MEMORY".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: ON_LOW_MEMORY");
+                  } else if ("APP_INIT_FAILURE".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: APP_INIT_FAILURE");
+                  } else if ("ON_DESTROY_UNKNOWN".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: ON_DESTROY_UNKNOWN");
+                  } else {
+                    throw new RuntimeException(
+                        "Callback called on finishing Activity. Finish reason: "
+                            + diagnosticFinishReason);
+                  }
+                }
                 Log.i(TAG, "Browser process init succeeded");
                 finishInitialization(savedInstanceState);
+
+                if (isFinishing() || isDestroyed()) {
+                  if ("ON_BACK_PRESSED".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: ON_BACK_PRESSED after init");
+                  } else if ("ON_LOW_MEMORY".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: ON_LOW_MEMORY after init");
+                  } else if ("APP_INIT_FAILURE".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: APP_INIT_FAILURE after init");
+                  } else if ("ON_DESTROY_UNKNOWN".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: ON_DESTROY_UNKNOWN after init");
+                  } else {
+                    throw new RuntimeException(
+                        "Callback called on finishing Activity after init. Finish reason: "
+                            + diagnosticFinishReason);
+                  }
+                }
                 getStarboardBridge().measureAppStartTimestamp();
               }
 
               @Override
               public void onFailure() {
+                if (isFinishing() || isDestroyed()) {
+                  if ("ON_BACK_PRESSED".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: ON_BACK_PRESSED");
+                  } else if ("ON_LOW_MEMORY".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: ON_LOW_MEMORY");
+                  } else if ("APP_INIT_FAILURE".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: APP_INIT_FAILURE");
+                  } else if ("ON_DESTROY_UNKNOWN".equals(diagnosticFinishReason)) {
+                    throw new RuntimeException("Finish reason: ON_DESTROY_UNKNOWN");
+                  } else {
+                    throw new RuntimeException(
+                        "Callback called on finishing Activity. Finish reason: "
+                            + diagnosticFinishReason);
+                  }
+                }
                 Log.e(TAG, "Browser process init failed");
                 initializationFailed();
               }
@@ -204,6 +230,12 @@ public abstract class CobaltActivity extends Activity {
 
   // Initially copied from ContentShellActiviy.java
   private void finishInitialization(Bundle savedInstanceState) {
+
+    // Initialize the platform's AudioSinkImpl. This is called here as this must come after the
+    // browser client's feature list and field trials are initialized. The feature list and field
+    // trials are initialized in CobaltContentBrowserClient::CreateFeatureListAndFieldTrials().
+    getStarboardBridge().initializePlatformAudioSink();
+
     // Load an empty page to let shell create WebContents.
     mShellManager.launchShell("");
     // Inject JavaBridge objects to the WebContents.
@@ -217,6 +249,11 @@ public abstract class CobaltActivity extends Activity {
 
   // Initially copied from ContentShellActiviy.java
   private void initializationFailed() {
+    if (isFinishing() || isDestroyed()) {
+      throw new RuntimeException(
+          "initializationFailed on finishing Activity. Reason: " + diagnosticFinishReason);
+    }
+    diagnosticFinishReason = "APP_INIT_FAILURE";
     Log.e(TAG, "ContentView initialization failed.");
     Toast.makeText(
             CobaltActivity.this, R.string.browser_process_initialization_failed, Toast.LENGTH_SHORT)
@@ -224,49 +261,34 @@ public abstract class CobaltActivity extends Activity {
     finish();
   }
 
-  private static boolean isDpadKey(int keyCode) {
-      return keyCode == KeyEvent.KEYCODE_DPAD_UP
-              || keyCode == KeyEvent.KEYCODE_DPAD_LEFT
-              || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
-              || keyCode == KeyEvent.KEYCODE_DPAD_DOWN
-              || keyCode == KeyEvent.KEYCODE_DPAD_CENTER;
-  }
-
-  // Remap KeyEvent for imeAdapter.dispatchKeyEvent call.
-  protected static Optional<KeyEvent> getRemappedKeyEvent(int keyCode, int action) {
-    int mappedKeyCode;
-    if (keyCode == KeyEvent.KEYCODE_BACK) {
-      mappedKeyCode = KeyEvent.KEYCODE_ESCAPE;
-    } else if (isDpadKey(keyCode)) {
-      mappedKeyCode = keyCode;
-    } else {
-      return Optional.empty();
-    }
-    // |KeyEvent| needs to be created with |downTime| and |eventTime| set. If they are not set the
-    // app closes.
-    long eventTime = SystemClock.uptimeMillis();
-    return Optional.of(new KeyEvent(eventTime, eventTime, action, mappedKeyCode, 0));
-  }
-
-  protected boolean tryDispatchRemappedKey(int keyCode, int action) {
+  protected boolean dispatchKeyEventToIme(int keyCode, int action) {
     ImeAdapterImpl imeAdapter = getImeAdapterImpl();
     if (imeAdapter == null) {
       return false;
     }
 
-    return getRemappedKeyEvent(keyCode, action)
-        .map(event -> imeAdapter.dispatchKeyEvent(event))
-        .orElse(false);
+    // |KeyEvent| needs to be created with |downTime| and |eventTime| set. If they are not set the
+    // app closes.
+    long eventTime = SystemClock.uptimeMillis();
+    return imeAdapter.dispatchKeyEvent(new KeyEvent(eventTime, eventTime, action, keyCode, 0));
   }
 
   @Override
   public boolean onKeyDown(int keyCode, KeyEvent event) {
-    return tryDispatchRemappedKey(keyCode, KeyEvent.ACTION_DOWN) || super.onKeyDown(keyCode, event);
+    // If input is a from a gamepad button, it shouldn't be dispatched to IME which incorrectly
+    // consumes the event as a VKEY_UNKNOWN
+    if (KeyEvent.isGamepadButton(keyCode)) {
+        return super.onKeyDown(keyCode, event);
+    }
+    return dispatchKeyEventToIme(keyCode, KeyEvent.ACTION_DOWN) || super.onKeyDown(keyCode, event);
   }
 
   @Override
   public boolean onKeyUp(int keyCode, KeyEvent event) {
-    return tryDispatchRemappedKey(keyCode, KeyEvent.ACTION_UP) || super.onKeyUp(keyCode, event);
+    if (KeyEvent.isGamepadButton(keyCode)) {
+        return super.onKeyUp(keyCode, event);
+    }
+    return dispatchKeyEventToIme(keyCode, KeyEvent.ACTION_UP) || super.onKeyUp(keyCode, event);
   }
 
   // Initially copied from ContentShellActiviy.java
@@ -326,9 +348,6 @@ public abstract class CobaltActivity extends Activity {
     return webContents != null ? ImeAdapterImpl.fromWebContents(webContents) : null;
   }
 
-  // TODO(b/375442742): re-enable native code.
-  // private static native void nativeLowMemoryEvent();
-
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     // Record the application start timestamp.
@@ -341,18 +360,12 @@ public abstract class CobaltActivity extends Activity {
 
     super.onCreate(savedInstanceState);
     createContent(savedInstanceState);
+    MemoryPressureMonitor.INSTANCE.registerComponentCallbacks();
 
     videoSurfaceView = new VideoSurfaceView(this);
-
-    // TODO: b/408279606 - Set this to app theme primary color once we fix
-    // error with it being unresolvable.
-    videoSurfaceView.setBackgroundColor(Color.BLACK);
     a11yHelper = new CobaltA11yHelper(this, videoSurfaceView);
-    addContentView(videoSurfaceView, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
-
-    Log.i(TAG, "CobaltActivity onCreate, all Layout Views:");
-    View rootView = getWindow().getDecorView().getRootView();
-    Util.printRootViewHierarchy(rootView);
+    addContentView(
+        videoSurfaceView, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
   }
 
   /**
@@ -426,8 +439,7 @@ public abstract class CobaltActivity extends Activity {
       // visibility:visible event
       webContents.onShow();
     }
-
-    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    MemoryPressureMonitor.INSTANCE.enablePolling();
   }
 
   @Override
@@ -446,12 +458,30 @@ public abstract class CobaltActivity extends Activity {
     if (VideoSurfaceView.getCurrentSurface() != null) {
       forceCreateNewVideoSurfaceView = true;
     }
+    MemoryPressureMonitor.INSTANCE.disablePolling();
 
     // Set the SurfaceView to fullscreen.
     View rootView = getWindow().getDecorView();
     setVideoSurfaceBounds(0, 0, rootView.getWidth(), rootView.getHeight());
+  }
 
-    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+  @Override
+  protected void onResume() {
+    super.onResume();
+    diagnosticFinishReason = "Unknown";
+    if (mShouldReloadOnResume) {
+      WebContents webContents = getActiveWebContents();
+      if (webContents != null) {
+        webContents.getNavigationController().reload(true);
+      }
+      mShouldReloadOnResume = false;
+    }
+
+    View rootView = getWindow().getDecorView().getRootView();
+    if (rootView != null && rootView.isAttachedToWindow() && !rootView.hasFocus()) {
+      rootView.requestFocus();
+      Log.i(TAG, "Request focus on the root view on resume.");
+    }
   }
 
   @Override
@@ -460,6 +490,10 @@ public abstract class CobaltActivity extends Activity {
       mShellManager.destroy();
     }
     mWindowAndroid.destroy();
+    // If the reason is still unknown, it's likely a config change or system kill.
+    if ("Unknown".equals(diagnosticFinishReason)) {
+      diagnosticFinishReason = "ON_DESTROY_UNKNOWN";
+    }
     super.onDestroy();
     getStarboardBridge().onActivityDestroy(this);
   }
@@ -615,10 +649,6 @@ public abstract class CobaltActivity extends Activity {
             // where the view would be in a UI layout and to set the surface transform matrix to
             // match the view's size.
             videoSurfaceView.setLayoutParams(layoutParams);
-            // Set the background to transparent here to avoid obscuring UI
-            // elements. Some are rendered behind the background and rely on
-            // the background being transparent.
-            videoSurfaceView.setBackgroundColor(Color.TRANSPARENT);
           }
         });
   }
@@ -627,10 +657,6 @@ public abstract class CobaltActivity extends Activity {
     ViewParent parent = videoSurfaceView.getParent();
     if (parent instanceof FrameLayout) {
       FrameLayout frameLayout = (FrameLayout) parent;
-      Log.i(TAG, "createNewSurfaceView, before removing videoSurfaceView, all Views:");
-      View rootView = getWindow().getDecorView().getRootView();
-      Util.printRootViewHierarchy(rootView);
-
       int index = frameLayout.indexOfChild(videoSurfaceView);
       frameLayout.removeView(videoSurfaceView);
       Log.i(TAG, "removed videoSurfaceView at index:" + index);
@@ -642,18 +668,9 @@ public abstract class CobaltActivity extends Activity {
           index,
           new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
       Log.i(TAG, "inserted new videoSurfaceView at index:" + index);
-      Log.i(TAG, "after createNewSurfaceView, all Views:");
-      Util.printRootViewHierarchy(rootView);
     } else {
       Log.w(TAG, "Unexpected surface view parent class " + parent.getClass().getName());
     }
-  }
-
-  @Override
-  public void onLowMemory() {
-    super.onLowMemory();
-    // TODO(cobalt): re-enable native low memory event or remove code if unnecessary.
-    // nativeLowMemoryEvent();
   }
 
   public long getAppStartTimestamp() {
@@ -672,5 +689,36 @@ public abstract class CobaltActivity extends Activity {
             }
           }
         });
+  }
+
+  public void toggleKeepScreenOn(boolean keepOn) {
+    if (isKeepScreenOnEnabled != keepOn) {
+      runOnUiThread(
+          new Runnable() {
+            @Override
+            public void run() {
+              if (keepOn) {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                Log.i(TAG, "Screen keep-on enabled for video playback");
+              } else {
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                Log.i(TAG, "Screen keep-on disabled");
+              }
+            }
+          });
+      isKeepScreenOnEnabled = keepOn;
+    }
+  }
+
+  @Override
+  public void onBackPressed() {
+    diagnosticFinishReason = "ON_BACK_PRESSED";
+    super.onBackPressed();
+  }
+
+  @Override
+  public void onLowMemory() {
+    diagnosticFinishReason = "ON_LOW_MEMORY";
+    super.onLowMemory();
   }
 }

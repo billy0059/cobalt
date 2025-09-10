@@ -37,6 +37,11 @@ int connect(int sockfd, const struct sockaddr* addr, socklen_t addrlen) {
   return __abi_wrap_connect(sockfd, addr, addrlen);
 }
 
+const char* __abi_wrap_gai_strerror(int ecode);
+const char* gai_strerror(int ecode) {
+  return __abi_wrap_gai_strerror(ecode);
+}
+
 int __abi_wrap_getaddrinfo(const char* node,
                            const char* service,
                            const struct addrinfo* hints,
@@ -75,6 +80,11 @@ int setsockopt(int socket,
 int __abi_wrap_shutdown(int socket, int how);
 int shutdown(int socket, int how) {
   return __abi_wrap_shutdown(socket, how);
+}
+
+ssize_t __abi_wrap_sendmsg(int sockfd, const struct msghdr* msg, int flags);
+ssize_t sendmsg(int sockfd, const struct msghdr* msg, int flags) {
+  return __abi_wrap_sendmsg(sockfd, msg, flags);
 }
 
 }  // extern "C"
