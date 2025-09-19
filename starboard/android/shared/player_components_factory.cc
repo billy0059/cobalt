@@ -50,7 +50,8 @@
 #include "starboard/shared/starboard/player/filter/video_renderer_internal_impl.h"
 #include "starboard/shared/starboard/player/filter/video_renderer_sink.h"
 
-namespace starboard::android::shared {
+namespace starboard {
+namespace android::shared {
 namespace {
 
 using base::android::AttachCurrentThread;
@@ -66,8 +67,7 @@ constexpr bool kForceSecurePipelineInTunnelModeWhenRequired = true;
 constexpr bool kForceResetSurfaceUnderTunnelMode = true;
 
 // This class allows us to force int16 sample type when tunnel mode is enabled.
-class AudioRendererSinkAndroid : public ::starboard::shared::starboard::player::
-                                     filter::AudioRendererSinkImpl {
+class AudioRendererSinkAndroid : public AudioRendererSinkImpl {
  public:
   explicit AudioRendererSinkAndroid(int tunnel_mode_audio_session_id = -1)
       : AudioRendererSinkImpl(
@@ -111,9 +111,7 @@ class AudioRendererSinkAndroid : public ::starboard::shared::starboard::player::
   const int tunnel_mode_audio_session_id_;
 };
 
-class AudioRendererSinkCallbackStub
-    : public starboard::shared::starboard::player::filter::AudioRendererSink::
-          RenderCallback {
+class AudioRendererSinkCallbackStub : public AudioRendererSink::RenderCallback {
  public:
   bool error_occurred() const { return error_occurred_.load(); }
 
@@ -138,8 +136,7 @@ class AudioRendererSinkCallbackStub
   std::atomic_bool error_occurred_{false};
 };
 
-class PlayerComponentsPassthrough
-    : public starboard::shared::starboard::player::filter::PlayerComponents {
+class PlayerComponentsPassthrough : public PlayerComponents {
  public:
   PlayerComponentsPassthrough(
       std::unique_ptr<AudioRendererPassthrough> audio_renderer,
@@ -160,21 +157,7 @@ class PlayerComponentsPassthrough
 };
 }  // namespace
 
-class PlayerComponentsFactory : public starboard::shared::starboard::player::
-                                    filter::PlayerComponents::Factory {
-  typedef starboard::shared::starboard::player::filter::AdaptiveAudioDecoder
-      AdaptiveAudioDecoder;
-  typedef starboard::shared::starboard::player::filter::AudioRendererSink
-      AudioRendererSink;
-  typedef starboard::shared::starboard::player::filter::AudioRendererSinkImpl
-      AudioRendererSinkImpl;
-  typedef starboard::shared::starboard::player::filter::PlayerComponents
-      PlayerComponents;
-  typedef starboard::shared::starboard::player::filter::VideoRenderAlgorithm
-      VideoRenderAlgorithm;
-  typedef starboard::shared::starboard::player::filter::VideoRendererSink
-      VideoRendererSink;
-
+class PlayerComponentsFactory : public PlayerComponents::Factory {
   const int kAudioSinkFramesAlignment = 256;
   const int kDefaultAudioSinkMinFramesPerAppend = 1024;
 
@@ -230,9 +213,7 @@ class PlayerComponentsFactory : public starboard::shared::starboard::player::
         << "The maximum size in bytes of a buffer of data is "
         << max_video_input_size;
 
-    std::unique_ptr<
-        ::starboard::shared::starboard::player::filter::VideoRenderer>
-        video_renderer;
+    std::unique_ptr<VideoRenderer> video_renderer;
     if (creation_parameters.video_codec() != kSbMediaVideoCodecNone) {
       constexpr int kTunnelModeAudioSessionId = -1;
       constexpr bool kForceSecurePipelineUnderTunnelMode = false;
@@ -242,8 +223,6 @@ class PlayerComponentsFactory : public starboard::shared::starboard::player::
                              kForceSecurePipelineUnderTunnelMode,
                              max_video_input_size, error_message);
       if (video_decoder) {
-        using starboard::shared::starboard::player::filter::VideoRendererImpl;
-
         auto video_render_algorithm = video_decoder->GetRenderAlgorithm();
         auto video_renderer_sink = video_decoder->GetSink();
         auto media_time_provider = audio_renderer.get();
@@ -660,9 +639,7 @@ class PlayerComponentsFactory : public starboard::shared::starboard::player::
   }
 };
 
-}  // namespace starboard::android::shared
-
-namespace starboard::shared::starboard::player::filter {
+}  // namespace android::shared
 
 // static
 std::unique_ptr<PlayerComponents::Factory> PlayerComponents::Factory::Create() {
@@ -695,6 +672,6 @@ bool PlayerComponents::Factory::OutputModeSupported(
   return false;
 }
 
-}  // namespace starboard::shared::starboard::player::filter
+}  // namespace starboard
 
 #endif  // STARBOARD_ANDROID_SHARED_PLAYER_COMPONENTS_FACTORY_H_
